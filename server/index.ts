@@ -1,146 +1,89 @@
-/**
- * ArcTradeProof AI — Express API server
- *
- * SECURITY PROPERTIES:
- * - OPENAI_API_KEY is read from process.env only; never forwarded to browser
- * - CORS restricted to same-origin in production (ALLOWED_ORIGIN env var)
- * - Rate limiting: 20 AI requests / 15 minutes per IP
- * - Request body capped at 1.5 MB (covers 1 MB base64 + JSON overhead)
- * - 30-second timeout on all AI routes
- * - Document content is never logged
- * - Error responses never expose stack traces or raw API errors
- * - Health endpoint reports key presence only (boolean), never the key value
- *
- * ROUTE PREFIX: all routes are mounted at /api/*
- * - In development: the Vite dev proxy forwards /api/* → /api/* (no rewrite needed).
- *   vite.config.ts proxy target is http://localhost:3001 with rewrite removed.
- * - In production: Express serves the SPA from dist/ AND handles /api/* directly.
- *   The SPA calls fetch('/api/...') which Express handles on the same origin.
- *   No CORS issue, no proxy, no rewrite.
- */
-
+/** Same-origin API and SPA. AI is advisory; no wallet operations exist here. */
 import express, { type Request, type Response, type NextFunction } from 'express'
 import cors from 'cors'
 import rateLimit from 'express-rate-limit'
-import path from 'path'
-import { fileURLToPath } from 'url'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { extractDocumentHandler } from './routes/extract.js'
 import { compareHandler } from './routes/compare.js'
 import { reportHandler } from './routes/report.js'
+import { aiAvailable } from './ai.js'
 
-const app = express()
-const PORT = Number(process.env.PORT ?? 3001)
-
-// ── Production static file serving ──────────────────────────────────────────
-// In production, Vite's `dist/` is served from this same Express process.
-// This eliminates the CORS concern and the Vite dev proxy requirement.
-// Build command: bun run build     (runs vite build → dist/)
-// Start command: bun run start     (NODE_ENV=production bun run server/index.ts)
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const DIST_DIR  = path.resolve(__dirname, '..', 'dist')
-const IS_PROD   = process.env.NODE_ENV === 'production'
-
-// ── CORS ────────────────────────────────────────────────────────────────────
-// Production: same-origin (SPA and API on the same Render URL) — CORS headers
-// are not needed for same-origin requests, but we keep the middleware in case
-// of future multi-origin setups. ALLOWED_ORIGIN overrides when set.
-// Development: allow all origins so the Vite dev server (5173) can call us (3001).
-const allowedOrigin = process.env.ALLOWED_ORIGIN
-app.use(cors({
-  origin: allowedOrigin ?? true,
-  methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type'],
-}))
-
-// ── Body parser — cap at 1.5 MB ─────────────────────────────────────────────
-app.use(express.json({ limit: '1.5mb' }))
-
-// ── Rate limiter — 20 AI calls per 15 minutes per IP ────────────────────────
-const aiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'RATE_LIMITED', message: 'Too many requests. Please try again in 15 minutes.' },
-})
-
-// ── 30-second timeout middleware ─────────────────────────────────────────────
-function timeout(ms: number) {
-  return (_req: Request, res: Response, next: NextFunction) => {
-    const timer = setTimeout(() => {
-      if (!res.headersSent) {
-        res.status(504).json({ error: 'TIMEOUT', message: 'Request timed out.' })
-      }
-    }, ms)
-    res.on('finish', () => clearTimeout(timer))
-    res.on('close',  () => clearTimeout(timer))
+export function createApp(env: NodeJS.ProcessEnv = process.env) {
+  const app = express()
+  const production = env.NODE_ENV === 'production'
+  const proxyHops = Number(env.TRUST_PROXY_HOPS ?? 0)
+  if (!Number.isInteger(proxyHops) || proxyHops < 0 || proxyHops > 5) {
+    throw new Error('Invalid TRUST_PROXY_HOPS configuration')
+  }
+  // Trust only the documented, tested number of hops; never trust all senders.
+  app.set('trust proxy', proxyHops)
+  app.disable('x-powered-by')
+  const origins = new Set<string>()
+  for (const value of [env.PUBLIC_ORIGIN ?? env.RENDER_EXTERNAL_URL, env.ALLOWED_ORIGIN]) {
+    if (!value) continue
+    const url = new URL(value)
+    if (url.origin !== value || !['https:', 'http:'].includes(url.protocol)
+        || (production && url.protocol !== 'https:')) throw new Error('Invalid origin configuration')
+    origins.add(value)
+  }
+  if (!production) origins.add('http://localhost:5173')
+  app.use('/api', (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store')
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+    const origin = req.get('origin')
+    if (origin && !origins.has(origin)) {
+      res.status(403).json({ error: 'ORIGIN_DENIED', message: 'Origin is not allowed.' })
+      return
+    }
     next()
+  }, cors({
+    origin: (origin, cb) => cb(null, Boolean(origin && origins.has(origin))),
+    methods: ['GET', 'POST'], allowedHeaders: ['Content-Type'],
+  }))
+  app.get('/api/health', (_req, res) => {
+    const ready = aiAvailable()
+    res.json({ status: 'ok', aiReady: ready, model: ready ? 'gpt-4o-mini' : null,
+      message: ready ? 'AI configured with a bounded demo allowance; inference is not verified by this check.'
+        : 'AI unavailable. A server API key and remaining demo allowance are required.' })
+  })
+  const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false,
+    message: { error: 'RATE_LIMITED', message: 'Too many requests. Try again in 15 minutes.' },
+  })
+  // Rate-limit before parsing bodies. Reject compressed payloads to limit decompression work.
+  app.use(['/api/extract', '/api/compare', '/api/report'], limiter,
+    (req, res, next) => {
+      if (!req.is('application/json')) {
+        res.status(415).json({ error: 'UNSUPPORTED_TYPE', message: 'Send application/json.' })
+        return
+      }
+      next()
+    }, express.json({ limit: '1.5mb', inflate: false }))
+  app.post('/api/extract', extractDocumentHandler)
+  app.post('/api/compare', compareHandler)
+  app.post('/api/report', reportHandler)
+  app.use('/api', (_req, res) => {
+    res.status(404).json({ error: 'NOT_FOUND', message: 'API route not found.' })
+  })
+  if (production) {
+    const dist = fileURLToPath(new URL('../dist/', import.meta.url))
+    app.use(express.static(dist, { dotfiles: 'deny' }))
+    app.get('/{*splat}', (_req, res) => res.sendFile(path.join(dist, 'index.html')))
   }
+  // Never log raw exceptions: parsers/providers can embed input, headers, or credentials.
+  app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    if (res.headersSent) return
+    const type = (err as { type?: string })?.type
+    const status = type === 'entity.too.large' ? 413 : type === 'entity.parse.failed' ? 400
+      : type === 'encoding.unsupported' ? 415 : 500
+    res.status(status).json({ error: status === 500 ? 'INTERNAL_ERROR' : 'INVALID_REQUEST',
+      message: status === 500 ? 'An unexpected error occurred.' : 'Invalid or oversized JSON request.' })
+  })
+  return app
 }
 
-// ── Health check ─────────────────────────────────────────────────────────────
-// GET /api/health
-// Reports key PRESENCE only — never the key value, never any substring of it.
-// Use this as your Render/hosting liveness probe path.
-app.get('/api/health', (_req, res) => {
-  const hasKey = Boolean(process.env.OPENAI_API_KEY?.trim())
-  res.json({
-    status: 'ok',
-    aiReady: hasKey,
-    model: hasKey ? 'gpt-4o-mini' : null,
-    message: hasKey
-      ? 'OpenAI API key configured. Ready for document analysis.'
-      : 'OPENAI_API_KEY not set. Configure it in your hosting environment to enable AI extraction.',
-  })
-})
-
-// ── AI routes — rate-limited + timeout ──────────────────────────────────────
-// POST /api/extract  — PDF/text → structured extraction (OpenAI gpt-4o-mini)
-// POST /api/compare  — deterministic comparison (no AI, pure bigint arithmetic)
-// POST /api/report   — advisory narrative (OpenAI gpt-4o-mini)
-app.post('/api/extract', aiLimiter, timeout(30_000), extractDocumentHandler)
-app.post('/api/compare', aiLimiter, timeout(30_000), compareHandler)
-app.post('/api/report',  aiLimiter, timeout(30_000), reportHandler)
-
-// ── /api/* catch-all — unknown API routes return 404 JSON, never HTML ────────
-// Must be registered AFTER all known /api/* routes and BEFORE express.static
-// so that /api/nonexistent gets a proper JSON 404, not the SPA index.html.
-app.all('/api/{*splat}', (_req: Request, res: Response) => {
-  res.status(404).json({ error: 'NOT_FOUND', message: 'API route not found.' })
-})
-
-// ── Global error handler — never expose stack traces ────────────────────────
-app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-  console.error('[ArcTradeProof API] Unhandled error:', err instanceof Error ? err.message : 'unknown')
-  if (!res.headersSent) {
-    res.status(500).json({ error: 'INTERNAL_ERROR', message: 'An unexpected error occurred.' })
-  }
-})
-
-// ── Production: serve Vite SPA + handle client-side routing ─────────────────
-// API routes are registered ABOVE. Any other path either:
-//   a. Matches a static file in dist/   → served directly by express.static
-//   b. Matches nothing                  → falls through to the SPA index.html
-//      (required for React client-side navigation)
-//
-// In development the Vite dev server handles the SPA; only /api/* comes to us.
-if (IS_PROD) {
-  // Serve static assets (JS, CSS, images, fonts …)
-  app.use(express.static(DIST_DIR))
-  // SPA fallback — any unmatched GET returns index.html
-  // Express 5 / path-to-regexp v8 requires a named wildcard; bare '*' is rejected.
-  app.get('/{*splat}', (_req: Request, res: Response) => {
-    res.sendFile(path.join(DIST_DIR, 'index.html'))
-  })
+if (import.meta.main) {
+  const port = Number(process.env.PORT ?? 3001)
+  createApp().listen(port, () => console.log(`[ArcTradeProof API] Listening on port ${port}`))
 }
-
-app.listen(PORT, () => {
-  const hasKey = Boolean(process.env.OPENAI_API_KEY?.trim())
-  console.log(`[ArcTradeProof API] Listening on port ${PORT}`)
-  console.log(`[ArcTradeProof API] AI ready: ${hasKey}`)
-  console.log(`[ArcTradeProof API] Mode: ${IS_PROD ? 'production (serving dist/)' : 'development (Vite proxy)'}`)
-  console.log(`[ArcTradeProof API] CORS origin: ${allowedOrigin ?? '* (development)'}`)
-  if (!hasKey) {
-    console.warn('[ArcTradeProof API] Set OPENAI_API_KEY in your hosting environment to enable document analysis')
-  }
-})

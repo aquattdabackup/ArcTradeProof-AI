@@ -9,8 +9,8 @@
     "deploy:self": "bun run ./scripts/self-deploy.ts",
     "compass:deploy": "bun run ./scripts/compass-deploy.ts",
     "fetch:abi": "bun run ./scripts/fetch-abi.ts",
-    "lint": "oxlint --type-aware src scripts --fix; s=$?; oxlint --fix .; exit $((s>0?s:$?))",
-    "typecheck": "tsc --noEmit",
+    "lint": "bun run lint:app",
+    "typecheck": "bun run typecheck:app",
     "check": "bash scripts/check.sh",
     "contracts:build": "forge build",
     "contracts:test": "forge test",
@@ -18,7 +18,12 @@
     "start": "NODE_ENV=production bun run server/index.ts",
     "test:server": "bun test server/lib/compare.test.ts",
     "test:store": "bun test src/store/dealReviewStore.test.ts",
-    "test:all": "bun test server/lib/compare.test.ts src/store/dealReviewStore.test.ts"
+    "test:all": "bun test server src/store/dealReviewStore.test.ts",
+    "lint:app": "oxlint --type-aware src server vite.config.ts",
+    "lint:studio": "oxlint --type-aware scripts",
+    "typecheck:app": "tsc --noEmit -p tsconfig.json",
+    "typecheck:studio": "tsc --noEmit -p scripts/tsconfig.json",
+    "check:studio": "bun run lint:studio && bun run typecheck:studio"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.96",
@@ -46,7 +51,8 @@
     "sonner": "^1.7.1",
     "tailwind-merge": "^2.6.0",
     "viem": "^2.56.3",
-    "wagmi": "^2.19.5"
+    "wagmi": "^2.19.5",
+    "zod": "^4.6.7"
   },
   "overrides": {
     "viem": "^2.56.3"

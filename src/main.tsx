@@ -10,8 +10,12 @@
  *  https://studio.arc.io
  */
 
-import './tracing'
-import './console-capture'
+// Vite removes these imports entirely from production builds.
+// Debug capture is opt-in even in development; use synthetic documents only.
+if (import.meta.env.DEV && import.meta.env.VITE_STUDIO_DEBUG === 'true') {
+  void import('./tracing')
+  void import('./console-capture')
+}
 
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'

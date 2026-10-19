@@ -48,6 +48,9 @@ Thumbs.db
 
 # ── Logs ──────────────────────────────────────────────────────────────────────
 *.log
+console.jsonl
+traces.jsonl
+.runtime/
 npm-debug.log*
 bun-debug.log*
 

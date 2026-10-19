@@ -782,12 +782,11 @@ export function AiDocIntelligence({ onProceedToReview }: { onProceedToReview?: (
             : 'bg-rose-950/30 border-rose-800/40 text-rose-300'
         }`}>
           {aiReady
-            ? `✓ AI ready · Model: ${aiModel}`
+            ? `AI configured · Model: ${aiModel}`
             : `✗ ${aiMessage}`}
           {!aiReady && (
             <span className="block mt-1 text-slate-400">
-              Add <code className="bg-slate-800 px-1 rounded">OPENAI_API_KEY=sk-…</code> to{' '}
-              <code className="bg-slate-800 px-1 rounded">.env</code> and restart the backend server.
+              AI analysis is currently unavailable. Ask the demo operator to check access and the remaining allowance.
             </span>
           )}
         </div>
@@ -831,7 +830,7 @@ export function AiDocIntelligence({ onProceedToReview }: { onProceedToReview?: (
                 : 'bg-slate-800 text-slate-600 cursor-not-allowed'
               }`}
           >
-            {!aiReady ? 'AI not configured — add OPENAI_API_KEY to .env' : 'Analyse Documents'}
+            {!aiReady ? 'AI analysis unavailable' : 'Analyse Documents'}
           </button>
         </div>
       )}

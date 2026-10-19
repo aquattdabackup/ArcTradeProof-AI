@@ -1,10 +1,14 @@
 # ArcTradeProof AI
 
+> Built with Arc Studio for the Arc Microgrants: Built with Arc Studio competition.
+
 > AI-powered international trade escrow on Arc (USDC). Commercial documents → deterministic comparison → buyer-approved payment release.
 
 ## What It Does
 
 Buyers and suppliers turn commercial agreements (POs, invoices) into verifiable USDC payment workflows. The AI layer (gpt-4o-mini) extracts and compares commercial terms and produces an advisory report. A deterministic comparison engine (BigInt arithmetic, zero floating-point) independently validates monetary fields. The buyer reviews both outputs, makes an explicit approval decision, and signs a single transaction that releases USDC from the escrow contract.
+
+**Prototype, not an audited production trade-finance service. Mainnet deployment is not completed. Real AI inference has not yet been verified. AI cannot verify physical shipment or delivery.**
 
 **The AI is advisory only. It cannot sign transactions, access private keys, or release funds.**
 
@@ -25,7 +29,7 @@ Browser SPA (React + wagmi + ConnectKit)
 
 In **development**: Vite serves the SPA on port 5173 and proxies `/api/*` to the Express backend on port 3001.
 
-In **production**: Express serves the compiled SPA from `dist/` AND handles `/api/*` on the same port and origin. No Vite proxy, no CORS required.
+In **production**: Express serves the compiled SPA from `dist/` AND handles `/api/*` on the same port and origin. No Vite proxy. Requests carrying an Origin header must match PUBLIC_ORIGIN (or Render's RENDER_EXTERNAL_URL), or the explicitly configured ALLOWED_ORIGIN. With no origin configured, such requests are denied.
 
 ---
 
@@ -85,16 +89,29 @@ The Vite dev server proxies `/api/*` → `http://localhost:3001/api/*` automatic
 ### Test
 
 ```bash
-bun run test:all        # 63 tests: 36 comparison + 27 store/hash
-bun run test:server     # comparison engine only (36 tests)
+bun run test:all        # comparison, store/hash and security regression tests
+bun run test:server     # comparison engine only (47 tests)
 bun run test:store      # deal review store and hash tests (27 tests)
 ```
 
-### Lint + Typecheck
+### Application and Studio tooling checks
 
 ```bash
-bun run check           # oxlint + tsc --noEmit
+bun run lint:app        # type-aware lint: src/, server/, vite.config.ts
+bun run typecheck:app   # strict TypeScript check of the same application scope
+bun run lint           # alias for lint:app
+bun run typecheck      # alias for typecheck:app
 ```
+
+`tsconfig.json` retains `strict: true` and all previous compiler safety settings. It checks the production frontend/backend, their tests, and Vite configuration. Studio deployment scripts have a separate `scripts/tsconfig.json` with the same strict settings and explicit Node/Bun types:
+
+```bash
+bun run lint:studio
+bun run typecheck:studio
+bun run check:studio    # both, stops on the first failure
+```
+
+**Compass deployment tooling remains unverified outside Arc Studio.** `scripts/compass-deploy.ts` requires `@circlefin/compass-chains` (absent from this repository's dependencies; public npm lookup returned 404 during Stage 5.2), other dynamically loaded Compass packages, `/home/user/app` and Studio RPC settings. The related self-deploy helper also expects Studio-injected chain facts. This is evidence of a Studio-specific environment dependency, not a production app dependency. Neither the frontend/backend nor Vite imports these deployment helpers. No substitute package, declaration stub, compiler suppression or deployment-source deletion was introduced. The explicit Studio checks still fail on the unavailable package; application checks do not validate deployment tooling. See [Stage 5.3 verification](docs/stage5.3-report.md).
 
 ### Production Build (local verification)
 
@@ -110,17 +127,11 @@ NODE_ENV=production bun run start
 
 Render runs the Express backend and serves the compiled SPA from a single Web Service. One URL, no cross-origin issues, no separate static host.
 
-### Step 1 — Push to GitHub
+### Step 1 - Review the existing repository
 
-```bash
-git init          # if not already a git repo
-git add .
-git commit -m "Initial commit"
-git remote add origin https://github.com/<your-username>/<your-repo>.git
-git push -u origin main
-```
+Use the existing [ArcTradeProof-AI repository](https://github.com/aquattdabackup/ArcTradeProof-AI). Review changes and verification results before committing or pushing. Do not reinitialize Git.
 
-Make sure `.gitignore` excludes `.env`, `dist/`, `node_modules/`, and `.circle/` (it does by default in this project).
+The ignore rules exclude `.env`, `dist/`, `node_modules/`, `.circle/`, local runtime files, `console.jsonl` and `traces.jsonl`. Removing tracked logs in a new commit **does not remove earlier history**.
 
 ### Step 2 — Create a Render Web Service
 
@@ -136,7 +147,7 @@ Make sure `.gitignore` excludes `.env`, `dist/`, `node_modules/`, and `.circle/`
 | **Start Command** | `bun run start` |
 | **Health Check Path** | `/api/health` |
 
-> Render auto-detects Bun from `.bun-version`. If it does not, set the environment variable `BUN_VERSION=1.3.14`.
+> Ensure Bun is available during build/start; the project pins 1.3.14 in `.bun-version`. Verify the hosting runtime during deployment.
 
 ### Step 3 — Set Environment Variables
 
@@ -144,10 +155,14 @@ In the Render dashboard → your service → **Environment** tab, add:
 
 | Key | Value | Notes |
 |---|---|---|
-| `OPENAI_API_KEY` | `sk-…` | Required for AI features. Add as a **Secret** — Render will not expose it in logs. |
+| `OPENAI_API_KEY` | _(server secret)_ | Required for AI features. Never use a VITE_ prefix. |
 | `NODE_ENV` | `production` | Required. Enables `express.static(dist/)` and SPA fallback routing. |
 | `PORT` | _(leave blank)_ | Render sets this automatically. The server reads `process.env.PORT`. |
-| `ALLOWED_ORIGIN` | _(leave blank)_ | Not needed when SPA and API share the same Render URL. |
+| `PUBLIC_ORIGIN` | `https://your-app.onrender.com` | Exact origin, no trailing slash. Defaults to RENDER_EXTERNAL_URL on Render. Set explicitly for a custom domain. |
+| `ALLOWED_ORIGIN` | _(leave blank)_ | Optional one additional exact HTTPS frontend origin. Never `*`. |
+| `TRUST_PROXY_HOPS` | `1` | For one trusted reverse proxy hop only; verify actual Render topology before enabling AI. Never set trust proxy to true. |
+| `AI_MAX_CALLS` | `60` | Explicit opt-in total allowance, 1-300. Default 0 disables AI. Two extractions and one report normally cost 3 attempts. |
+| `AI_BUDGET_FILE` | `/var/data/arctradeproof/ai-calls.json` | Absolute path on a Render persistent disk. One instance/process only. Keep outside dist/. |
 
 > **Never** paste your `OPENAI_API_KEY` in chat, source code, comments, or commit messages.
 
@@ -161,8 +176,6 @@ Build log will show:
 ==> Build succeeded
 ==> Starting service: bun run start
 [ArcTradeProof API] Listening on port 10000
-[ArcTradeProof API] AI ready: true
-[ArcTradeProof API] Mode: production (serving dist/)
 ```
 
 ### Step 5 — Verify
@@ -170,6 +183,7 @@ Build log will show:
 ```bash
 curl https://your-app.onrender.com/api/health
 # {"status":"ok","aiReady":true,"model":"gpt-4o-mini",...}
+# aiReady means configured with remaining allowance; it does not verify real inference.
 ```
 
 Open `https://your-app.onrender.com` in the browser — the full SPA loads.
@@ -183,7 +197,7 @@ Open `https://your-app.onrender.com` in the browser — the full SPA loads.
 | Network | Address | Tx Hash |
 |---|---|---|
 | Arc Testnet (v1 — superseded) | `0xc97f09fbb33ee61442145aec710818e79aab8c7c` | `0x551feb06ad5d4e2c1fade7910b99e14beaca44bdd320a1fe8c0de95950c261e9` |
-| Arc Testnet (v2 — production) | `0x7f1af92df34d8e58dba70688404de57276a42bc7` | `0x6c4769659da5d75656718d69bff8ab4f986c013339f8f5182dfd100624a2a740` |
+| Arc Testnet (v2 — current demo) | `0x7f1af92df34d8e58dba70688404de57276a42bc7` | `0x6c4769659da5d75656718d69bff8ab4f986c013339f8f5182dfd100624a2a740` |
 | Arc Mainnet | _(not yet deployed)_ | — |
 
 ### State Machine
@@ -212,9 +226,11 @@ bun run contracts:test    # forge test — 61 tests
 
 ### Completed Demo Deal (Deal #1)
 
-Deal #1 on Arc Testnet is in **`EVIDENCE_SUBMITTED` (status 3)** — TX5 (submitEvidence) was executed; TX6 (approveAndRelease) has not yet been signed.
+Deal #1 is **RELEASED (4)**. TX6 succeeded and released **0.25 TESTNET USDC** to the seller, as confirmed by the project owner:
 
-**The deal has NOT been released and is NOT reusable** once released (status moves to `RELEASED` permanently).
+`0x1c538deb65c7333e29f7631788319729b326e5d20369a452f2f6d4fb1251ea64`
+
+**Do not execute TX6 again for Deal #1.** The completed deal is not reusable. This is a testnet result, not a mainnet or real-money settlement. Real AI inference remains unverified.
 
 To verify Deal #1 status live:
 ```
@@ -251,22 +267,21 @@ Function: getDealStatus(1)
 
 ## AI Endpoint Abuse Protection
 
-| Control | Implementation |
-|---|---|
-| Rate limiting | 20 requests / 15 minutes / IP (`express-rate-limit`) |
-| Body size cap | 1.5 MB per request |
-| Document text cap | 12,000 characters per LLM call |
-| File type allowlist | PDF, plain text, CSV only |
-| Timeout | 30 seconds per AI call |
-| API key absent | HTTP 503 with `AI_NOT_CONFIGURED` — no fallback, no mock |
-| Error responses | Never expose stack traces, API errors, or key fragments |
-| Key in response | Never — health endpoint returns boolean `aiReady` only |
-| Key in frontend bundle | Never — all AI calls are server-side |
+- AI is disabled by default (`AI_MAX_CALLS=0`), even if a server key exists. Configure an allowance and a persistent budget path to enable the judging demo.
+- One shared, finite allowance covers extraction and report calls across visitors. Each attempt is persisted **before** calling OpenAI, including failures. Normal process restarts using the same file preserve usage (verified with separate local processes). No automatic reset. Increasing AI_MAX_CALLS increases the lifetime allowance (maximum 300); deleting the budget file resets it and must be treated as an explicit operator action.
+- **Render persistence is not configured or verified by this repository or this review.** Before enabling paid AI, attach a persistent disk and point AI_BUDGET_FILE inside its mount. The example path alone does not provision storage.
+- Run exactly **one process and one instance**. Atomic file replacement protects against partial writes, not competing processes. Multiple replicas require a shared transactional store before enabling paid AI. Ephemeral storage loses the limit on redeploy; use a persistent disk. The zero-key demo can run without a disk.
+- At most 2 concurrent AI calls, 2,500 output tokens each, no automatic retries, and a 30-second abort signal. A canceled or failed call may still be billed by the provider.
+- Public POST routes share 20 requests per 15 minutes per client IP (including IPv6 subnet grouping), before JSON parsing. This limits requests, not just successful inference. Test the configured reverse proxy hop count against the live host; a local simulation cannot prove provider topology.
+- JSON body limit 1.5 MB; compressed bodies rejected. Files limited to 1,000,000 decoded bytes; base64 syntax and file types validated. PDFs must have at most 10 pages. Text and report prompts are limited to 12,000 characters; oversized content is rejected rather than silently truncated.
+- All document inputs and model outputs pass bounded Zod schemas. Report comparisons are recomputed from validated documents; client-supplied comparison results are ignored. Monetary parsing uses BigInt and rejects malformed, negative or overly precise amounts.
+- Errors return generic JSON without raw provider/parser errors or document contents. No raw exceptions are logged. Health reports configuration status only.
+- CORS fails closed. CORS is a browser policy, **not authentication**: anonymous command-line callers can spend the bounded allowance. They can exhaust it and deny access to judges. For restricted judging, place an authenticated gateway in front of AI routes or the service; never embed a shared secret in the SPA.
+- Studio capture is opt-in in development with `VITE_STUDIO_DEBUG=true`; both import paths are removed by Vite in production. Use only synthetic documents when enabling capture.
 
-**Additional spend controls to add before high-traffic production use:**
-- Set a monthly spend cap in your OpenAI account dashboard.
-- Add `x-forwarded-for` trust configuration if behind a load balancer (so rate limiting applies to real client IPs, not the proxy IP).
-- Consider a Cloudflare WAF rule or API gateway for DDoS protection.
+For judging: open the SPA, load the provided synthetic PO/invoice files, run analysis, and inspect the advisory results. No login is needed with the allowance enabled. Without a server key the UI remains accessible, AI routes return JSON 503, and deterministic `/api/compare` remains available. A real inference session must still be verified by the owner.
+
+Proxy guidance: [Express behind proxies](https://expressjs.com/en/guide/behind-proxies.html), [Render edge protection and client IP guidance](https://render.com/articles/how-render-handles-ddos-attacks). PDF API: [pdf-parse v2](https://github.com/mehmet-kozan/pdf-parse).
 
 ---
 
@@ -300,7 +315,7 @@ server/
   lib/
     pdfExtract.ts             pdf-parse wrapper
     compare.ts                Deterministic BigInt comparison engine
-    compare.test.ts           36 unit tests
+    compare.test.ts           47 unit tests
 
 src/
   App.tsx                     Root — tab navigation + DealReviewProvider
@@ -334,4 +349,6 @@ src/
 - [x] Stage 3: Frontend and wallet integration (TX1–TX5 executed on testnet)
 - [x] Stage 4: AI document verification (63/63 tests, production build clean)
 - [x] Stage 5: Production deployment preparation (this stage)
-- [ ] Stage 6: Real USDC demo with live AI extraction on testnet
+- [x] Stage 6 transaction: Deal #1 released 0.25 TESTNET USDC (TX6 complete; do not repeat)
+- [ ] Stage 6 AI verification: real inference still unverified
+- [ ] Mainnet deployment: not completed

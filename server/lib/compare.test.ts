@@ -265,3 +265,13 @@ describe('reviewHash', () => {
     )
   })
 })
+
+
+describe('malformed monetary values fail closed', () => {
+  for (const value of ['-100', '+100', '1e3', '1.2.3', '1,00', '1.0000001', '(100)', '100 EUR', 'USD 1 / 2', '1'.repeat(101)]) {
+    test(`rejects ${value.slice(0, 20)}`, () => expect(parseAmountToBaseUnits(value)).toBeNull())
+  }
+  test('retains exact six decimal precision', () => {
+    expect(parseAmountToBaseUnits('USD 1,234.000001')).toBe(1_234_000_001n)
+  })
+})

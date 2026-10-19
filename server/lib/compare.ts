@@ -19,13 +19,14 @@ import type { ExtractedDocument, ComparisonResult, FieldComparison, FieldStatus,
  */
 export function parseAmountToBaseUnits(raw: string | null): bigint | null {
   if (!raw) return null
-  // Strip currency symbols, commas, whitespace, letter codes
-  const cleaned = raw.replace(/[^0-9.]/g, '')
-  if (!cleaned || cleaned === '.') return null
-  // Parse to float then scale — use string manipulation to avoid float imprecision
-  const parts = cleaned.split('.')
-  const intPart = parts[0] ?? '0'
-  const fracPart = (parts[1] ?? '').padEnd(6, '0').slice(0, 6)
+  // Reject signs, scientific notation, ambiguous grouping and excess precision.
+  // Never silently delete punctuation/digits or round a financial amount.
+  if (raw.length > 100) return null
+  const cleaned = raw.trim().replace(/^(?:USD[C]?\s*|\$\s*)/i, '')
+    .replace(/\s*USD[C]?$/i, '').trim()
+  if (!/^(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)(?:\.[0-9]{1,6})?$/.test(cleaned)) return null
+  const [intPart, fraction = ''] = cleaned.replace(/,/g, '').split('.')
+  const fracPart = fraction.padEnd(6, '0')
   try {
     return BigInt(intPart) * 1_000_000n + BigInt(fracPart)
   } catch {

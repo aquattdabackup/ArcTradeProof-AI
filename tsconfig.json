@@ -31,6 +31,6 @@
       ]
     }
   },
-  "include": ["src", "scripts", "server"]
+  "include": ["src", "server", "vite.config.ts"]
 }
 

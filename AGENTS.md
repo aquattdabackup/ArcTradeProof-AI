@@ -48,8 +48,10 @@ FUNDED | EVIDENCE_SUBMITTED -> REFUNDED (after expiration)
 - [x] Stage 2: Tests and security review — COMPLETE (61/61 tests pass, Slither clean, max review clean, deployed to Arc Testnet)
 - [x] Stage 3: Frontend and wallet integration — COMPLETE (TX1–TX5 executed on Arc Testnet)
 - [x] Stage 4: AI document verification — COMPLETE (63/63 tests pass, Stage 4.2 dynamic reviewHash flow complete)
-- [x] Stage 5: Production deployment preparation — COMPLETE (see docs/stage5-report.md)
-- [ ] Stage 6: Real USDC demo — TX6 (approveAndRelease) + live AI extraction on testnet
+- [x] Stage 5: Production deployment preparation — COMPLETE (historical results below; see README.md for current hardening requirements)
+- [x] Stage 6 transaction: Deal #1 RELEASED (4), 0.25 TESTNET USDC to seller; TX6 `0x1c538deb65c7333e29f7631788319729b326e5d20369a452f2f6d4fb1251ea64`. Do not repeat TX6.
+- [ ] Stage 6 AI: real inference not yet verified. Mainnet not deployed.
+- Prototype, not an audited production trade-finance service. AI cannot verify physical shipment/delivery; buyer authorization is required for release.
 
 ## Stage 5 — Production Readiness (completed)
 - Fixed critical /api prefix bug: Express routes now at /api/* (not /) to match apiClient.ts
@@ -62,7 +64,7 @@ FUNDED | EVIDENCE_SUBMITTED -> REFUNDED (after expiration)
 - Written production README with exact Render deployment instructions
 - Deployment: Render Web Service, single origin, bun install && bun run build / bun run start
 - Health check path: /api/health
-- Required env var at runtime: OPENAI_API_KEY (set in Render dashboard as Secret)
+- AI runtime: OPENAI_API_KEY (server secret), explicit AI_MAX_CALLS allowance and AI_BUDGET_FILE on persistent storage; configure PUBLIC_ORIGIN and verify TRUST_PROXY_HOPS (see README).
 - 63/63 tests pass, 0 lint warnings, 0 TS errors, production build succeeded
 
 ## To Run
@@ -71,3 +73,9 @@ FUNDED | EVIDENCE_SUBMITTED -> REFUNDED (after expiration)
 bun install
 bun run dev
 ```
+
+## Stage 5.3 — Verification scope
+- Default lint/typecheck now check the strict production application (src, server and Vite configuration); explicit commands: `bun run lint:app`, `bun run typecheck:app`.
+- Studio deployment tooling is preserved and checked separately via `bun run lint:studio` / `bun run typecheck:studio`; it remains unverified because @circlefin/compass-chains is unavailable outside the supplied Studio environment.
+- Paid AI defaults to disabled. AI_BUDGET_FILE persists the attempt counter only on retained storage; Render persistent disk setup has not been verified.
+- Current pre-commit evidence and staged manifest: docs/stage5.3-report.md. Do not interpret historical Stage 5 results above as validation of unavailable tooling.
