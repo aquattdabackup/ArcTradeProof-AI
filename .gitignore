@@ -1,0 +1,60 @@
+# ── Dependencies ─────────────────────────────────────────────────────────────
+node_modules/
+.pnp
+.pnp.js
+
+# ── Build artifacts ───────────────────────────────────────────────────────────
+dist/
+build/
+.vite/
+
+# ── Foundry / contracts ───────────────────────────────────────────────────────
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+# Forge deployment broadcast files can contain sensitive deploy args
+# Keep contract-metadata (deployed addresses) committed — it is reference data only
+!contracts/contract-metadata/
+
+# ── Environment / secrets ─────────────────────────────────────────────────────
+# NEVER commit .env files containing real API keys or entity secrets.
+.env
+.env.*
+!.env.example
+
+# ── Circle credentials ────────────────────────────────────────────────────────
+.circle/
+recovery_file*.dat
+entity_secret*.dat
+
+# ── Wallet / key material ─────────────────────────────────────────────────────
+*.key
+*.pem
+*.p12
+*.pfx
+keystore/
+wallet*.json
+
+# ── TypeScript incremental build info ─────────────────────────────────────────
+*.tsbuildinfo
+
+# ── OS / editor ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/settings.json
+*.swp
+*.swo
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+npm-debug.log*
+bun-debug.log*
+
+# ── Test / coverage ───────────────────────────────────────────────────────────
+coverage/
+lcov.info
+
+# ── Bun ───────────────────────────────────────────────────────────────────────
+# bun.lock IS committed (reproducible installs)
+# .bun-version IS committed (Render reads it for runtime version)
