@@ -23,7 +23,7 @@ Browser SPA (React + wagmi + ConnectKit)
                         ├─ /api/compare   Deterministic BigInt comparison (no AI)
                         ├─ /api/report    OpenAI gpt-4o-mini advisory narrative
                         └─ /api/health    Liveness probe
-    └─ wallet writes  → MetaMask → Arc Testnet / Arc Mainnet
+    └─ wallet writes  → MetaMask → Arc Testnet (current escrow)
                             └─ ArcTradeProofEscrow.sol
 ```
 
@@ -63,11 +63,11 @@ cd arctradeproof-ai
 bun install
 ```
 
-Copy `.env.example` to `.env` and fill in your `OPENAI_API_KEY`:
+Copy `.env.example` to `.env` for local configuration. Keep paid AI disabled for the first deployment:
 
 ```bash
 cp .env.example .env
-# Edit .env — add your OPENAI_API_KEY
+# Keep AI_MAX_CALLS=0 and OPENAI_API_KEY empty; never commit .env
 ```
 
 ### Run (two terminals)
@@ -123,70 +123,73 @@ NODE_ENV=production bun run start
 
 ---
 
-## Deployment: Render (recommended)
+## Deployment: Render (first public deployment, paid AI disabled)
 
-Render runs the Express backend and serves the compiled SPA from a single Web Service. One URL, no cross-origin issues, no separate static host.
+Render serves the SPA and API from one Web Service. This is a limited public testnet demo, not a verified AI service. Review [the Stage 5.4A pre-flight report](docs/stage5.4a-report.md) before operating the dashboard. Preparation does not authorize deployment.
 
-### Step 1 - Review the existing repository
+### Source and runtime
 
-Use the existing [ArcTradeProof-AI repository](https://github.com/aquattdabackup/ArcTradeProof-AI). Review changes and verification results before committing or pushing. Do not reinitialize Git.
-
-The ignore rules exclude `.env`, `dist/`, `node_modules/`, `.circle/`, local runtime files, `console.jsonl` and `traces.jsonl`. Removing tracked logs in a new commit **does not remove earlier history**.
-
-### Step 2 — Create a Render Web Service
-
-1. Go to [render.com](https://render.com) → New → Web Service
-2. Connect your GitHub repository
-3. Configure:
+After review and explicit deployment approval, choose **New > Web Service > Git Provider**, connect GitHub, and select `aquattdabackup/ArcTradeProof-AI`. Use the existing repository; do not reinitialize Git. Creating the service starts its first deployment. [Render Web Services](https://render.com/docs/web-services)
 
 | Setting | Value |
 |---|---|
-| **Runtime** | Node |
-| **Region** | Oregon (US West) or nearest |
-| **Build Command** | `bun install && bun run build` |
-| **Start Command** | `bun run start` |
-| **Health Check Path** | `/api/health` |
+| Source | GitHub-connected `aquattdabackup/ArcTradeProof-AI` |
+| Branch | `main`; verify the approved commit in the deployment details |
+| Root Directory | Leave unset (repository root) |
+| Language / Runtime | Native Node / JavaScript-TypeScript, with Bun |
+| Region | Choose the region appropriate for the intended audience |
+| Build Command | `bun --version && bun install --frozen-lockfile && bun run build` |
+| Start Command | `bun run start` |
+| Health Check Path | `/api/health` |
+| Instances / processes | One instance, the single process started by the command above |
+| Auto-Deploy | Off during this controlled rollout; deploy only after review |
 
-> Ensure Bun is available during build/start; the project pins 1.3.14 in `.bun-version`. Verify the hosting runtime during deployment.
+Render's native JavaScript runtime supports Bun at build and runtime. Set `BUN_VERSION=1.3.14`; the repository also contains `.bun-version` with that value. Render supports both, with the environment variable taking precedence. The build must include devDependencies for Vite; do not add `--production` to the install command. [Native runtimes](https://render.com/docs/native-runtimes), [Bun version selection](https://render.com/docs/bun-version)
 
-### Step 3 — Set Environment Variables
+Auto-deploys otherwise default to deployment on a linked-branch commit. Select **Off** in service Settings for manual control. [Deployment controls](https://render.com/docs/deploys)
 
-In the Render dashboard → your service → **Environment** tab, add:
+### First-deployment environment
 
-| Key | Value | Notes |
-|---|---|---|
-| `OPENAI_API_KEY` | _(server secret)_ | Required for AI features. Never use a VITE_ prefix. |
-| `NODE_ENV` | `production` | Required. Enables `express.static(dist/)` and SPA fallback routing. |
-| `PORT` | _(leave blank)_ | Render sets this automatically. The server reads `process.env.PORT`. |
-| `PUBLIC_ORIGIN` | `https://your-app.onrender.com` | Exact origin, no trailing slash. Defaults to RENDER_EXTERNAL_URL on Render. Set explicitly for a custom domain. |
-| `ALLOWED_ORIGIN` | _(leave blank)_ | Optional one additional exact HTTPS frontend origin. Never `*`. |
-| `TRUST_PROXY_HOPS` | `1` | For one trusted reverse proxy hop only; verify actual Render topology before enabling AI. Never set trust proxy to true. |
-| `AI_MAX_CALLS` | `60` | Explicit opt-in total allowance, 1-300. Default 0 disables AI. Two extractions and one report normally cost 3 attempts. |
-| `AI_BUDGET_FILE` | `/var/data/arctradeproof/ai-calls.json` | Absolute path on a Render persistent disk. One instance/process only. Keep outside dist/. |
+| Key | Exact action |
+|---|---|
+| `BUN_VERSION` | Set `1.3.14` |
+| `NODE_ENV` | Set `production` |
+| `AI_MAX_CALLS` | Set `0` |
+| `TRUST_PROXY_HOPS` | Set `0`; actual Render proxy behavior is not verified |
+| `OPENAI_API_KEY` | **Do not add**; ensure no attached environment group supplies it |
+| `AI_BUDGET_FILE` | Leave unset while paid AI is disabled; no disk is required for this mode |
+| `PORT` | Do not override; use Render's supplied port (default `10000`) |
+| `PUBLIC_ORIGIN` | Leave **unset**, not an empty entry, to use `RENDER_EXTERNAL_URL` for the default domain |
+| `ALLOWED_ORIGIN` | Leave unset; never use `*` |
+| `VITE_STUDIO_DEBUG` | Leave unset; production tracing remains excluded |
 
-> **Never** paste your `OPENAI_API_KEY` in chat, source code, comments, or commit messages.
+Do not upload `.env` or configure deployment private keys, seed phrases or browser credentials. Keep the existing ignore rules for local files, generated bundles and debug logs. Old log history is not removed by those ignore rules.
 
-### Step 4 — Deploy
+Render supplies `RENDER_EXTERNAL_URL` as the service's HTTPS `onrender.com` URL. The server validates it as an exact HTTPS origin; neither Host nor forwarded headers choose the allowed origin. If using a custom domain later, set `PUBLIC_ORIGIN` to its exact HTTPS origin with no trailing slash. An explicit empty value suppresses the fallback and denies Origin-bearing requests. [Render environment variables](https://render.com/docs/environment-variables)
 
-Click **Deploy** (or push to `main` — Render auto-deploys on push by default).
+Keep `TRUST_PROXY_HOPS=0` until actual proxy behavior is verified. This ignores caller-supplied forwarded IPs but can group visitors behind Render proxies into shared rate-limit buckets (20 POST requests per 15 minutes). Do not change it to `1` merely to resolve a 429; the existing one-hop unit test is not proof of Render topology.
 
-Build log will show:
-```
-==> Running build command: bun install && bun run build
-==> Build succeeded
-==> Starting service: bun run start
-[ArcTradeProof API] Listening on port 10000
-```
+### Verify after an approved, user-operated deployment
 
-### Step 5 — Verify
+Use the **actual** HTTPS URL shown by Render, not the placeholder below:
 
 ```bash
-curl https://your-app.onrender.com/api/health
-# {"status":"ok","aiReady":true,"model":"gpt-4o-mini",...}
-# aiReady means configured with remaining allowance; it does not verify real inference.
+curl -i https://YOUR-SERVICE.onrender.com/api/health
+# Expect HTTP 200, status "ok", aiReady false, model null.
+curl -i -X POST https://YOUR-SERVICE.onrender.com/api/extract \
+  -H 'Content-Type: application/json' -d '{}'
+# Expect HTTP 503, AI_NOT_CONFIGURED. Repeat for /api/report.
 ```
 
-Open `https://your-app.onrender.com` in the browser — the full SPA loads.
+Render's HTTP health check accepts 2xx/3xx responses. This endpoint checks API liveness and AI configuration, not successful inference, static assets, RPC availability or wallet interaction. [Health checks](https://render.com/docs/health-checks)
+
+Open the public HTTPS page and verify the JS/CSS load, a refreshed SPA path loads, `/api/unknown` returns JSON 404, same-origin API calls work, and an unrelated Origin returns 403 without an allow-origin header. The UI must show AI unavailable and disable analysis. Follow the report's deployment checklist; do not sign wallet transactions as part of this pre-flight. Browser and public-host checks have not been performed locally.
+
+### Paid AI is a separate, future approval
+
+Never enable paid inference on ephemeral filesystem storage. The budget integer at `AI_BUDGET_FILE` survives normal restarts only when the same file is retained. A later paid configuration requires a paid Render service with a persistent disk mounted, for example, at `/var/data`, with `AI_BUDGET_FILE=/var/data/arctradeproof/ai-calls.json`, and exactly one process/instance. Only paths under the mount persist; disks are available at runtime and prevent multi-instance scaling and zero-downtime deploys. No disk has been configured or verified here. [Persistent disks](https://render.com/docs/disks)
+
+A shared transactional database with atomic capped reservations is an alternative requiring implementation and tests; it is not supported by the current file-based code. Before future AI approval, verify storage across restart/redeploy, proxy handling and access controls. A real successful inference is still required before claiming AI works. See the budget limitations below and the pre-flight report.
 
 ---
 
@@ -239,6 +242,8 @@ Function: getDealStatus(1)
 ```
 
 ### How to Create a Fresh Testnet Deal
+
+The sequence below describes the intended testnet flow, not a verified general-purpose onboarding UI. The current frontend retains fixed demo participants, amounts and evidence guards in several transaction steps. The first public deployment also disables AI analysis. A fresh end-to-end workflow requires separate verification and approval; do not use it as a deployment smoke test.
 
 1. **Get testnet USDC.** Use the "Get test USDC" button in Arc Studio sidebar, or the [Arc Testnet faucet](https://faucet.testnet.arc.io).
 
