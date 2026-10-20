@@ -39,10 +39,11 @@ const { createApp } = await import('./index.js')
 const { withAiCall } = await import('./ai.js')
 const directory = mkdtempSync(join(tmpdir(), 'arctradeproof-security-'))
 const budgetFile = join(directory, 'budget.json')
-const previous = { key: process.env.OPENAI_API_KEY, max: process.env.AI_MAX_CALLS, file: process.env.AI_BUDGET_FILE }
+const previous = { key: process.env.OPENAI_API_KEY, max: process.env.AI_MAX_CALLS, file: process.env.AI_BUDGET_FILE,
+  vercel: process.env.VERCEL }
 const servers: Server[] = []
-async function serve(overrides: Record<string, string> = {}) {
-  const app = createApp({ NODE_ENV: 'production', PUBLIC_ORIGIN: 'https://demo.example', ...overrides })
+async function serve(overrides: NodeJS.ProcessEnv = {}, options: { serveStatic?: boolean } = {}) {
+  const app = createApp({ NODE_ENV: 'production', PUBLIC_ORIGIN: 'https://demo.example', ...overrides }, options)
   const server = app.listen(0, '127.0.0.1')
   servers.push(server)
   await new Promise<void>(resolve => server.once('listening', resolve))
@@ -54,6 +55,7 @@ function post(base: string, route: string, body: unknown, headers = {}) {
     headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) })
 }
 beforeEach(() => {
+  delete process.env.VERCEL
   process.env.OPENAI_API_KEY = ''
   process.env.AI_MAX_CALLS = '3'
   process.env.AI_BUDGET_FILE = budgetFile
@@ -64,7 +66,7 @@ beforeEach(() => {
 afterAll(() => {
   for (const server of servers) server.close()
   for (const [name, value] of Object.entries({ OPENAI_API_KEY: previous.key,
-    AI_MAX_CALLS: previous.max, AI_BUDGET_FILE: previous.file })) {
+    AI_MAX_CALLS: previous.max, AI_BUDGET_FILE: previous.file, VERCEL: previous.vercel })) {
     if (value === undefined) delete process.env[name]
     else process.env[name] = value
   }
@@ -72,6 +74,66 @@ afterAll(() => {
 })
 
 describe('production HTTP security', () => {
+  test('API-only Function serves JSON API routes without a static SPA fallback', async () => {
+    const base = await serve({}, { serveStatic: false })
+    for (const path of ['/', '/buyer/review', '/index.html']) {
+      const res = await fetch(base + path)
+      expect(res.status).toBe(404)
+      expect(await res.text()).not.toContain('id="root"')
+    }
+    const health = await fetch(base + '/api/health')
+    expect(health.status).toBe(200)
+    expect((await health.json() as { aiReady: boolean }).aiReady).toBe(false)
+    const missing = await fetch(base + '/api/not-found')
+    expect(missing.status).toBe(404)
+    expect((await missing.json() as { error: string }).error).toBe('NOT_FOUND')
+  })
+  test('Vercel origin fallback allows only the exact deployment; explicit origin overrides it', async () => {
+    const env = { PUBLIC_ORIGIN: undefined, VERCEL: '1', VERCEL_URL: 'demo-unique.vercel.app',
+      RENDER_EXTERNAL_URL: 'https://old-render.example' }
+    const base = await serve(env)
+    const accepted = await post(base, 'compare', {}, { Origin: 'https://demo-unique.vercel.app' })
+    expect(accepted.status).toBe(400)
+    expect(accepted.headers.get('access-control-allow-origin')).toBe('https://demo-unique.vercel.app')
+    for (const origin of ['https://other.vercel.app', 'https://demo-unique.vercel.app.attacker.example',
+      'https://old-render.example', 'http://demo-unique.vercel.app']) {
+      const rejected = await post(base, 'compare', {}, { Origin: origin,
+        'X-Forwarded-Host': 'demo-unique.vercel.app' })
+      expect(rejected.status).toBe(403)
+      expect(rejected.headers.get('access-control-allow-origin')).toBeNull()
+    }
+    const explicit = await serve({ ...env, PUBLIC_ORIGIN: 'https://trade.example' })
+    expect((await post(explicit, 'compare', {}, { Origin: 'https://trade.example' })).status).toBe(400)
+    expect((await post(explicit, 'compare', {}, { Origin: 'https://demo-unique.vercel.app' })).status).toBe(403)
+    const blank = await serve({ ...env, PUBLIC_ORIGIN: '' })
+    expect((await post(blank, 'compare', {}, { Origin: 'https://demo-unique.vercel.app' })).status).toBe(403)
+  })
+  test('missing Vercel hostname fails closed; malformed hostname fails startup', async () => {
+    const base = await serve({ PUBLIC_ORIGIN: undefined, VERCEL: '1', RENDER_EXTERNAL_URL: 'https://old.example' })
+    expect((await post(base, 'compare', {}, { Origin: 'https://old.example' })).status).toBe(403)
+    for (const host of ['https://demo.vercel.app', 'demo.vercel.app/path', 'user@demo.vercel.app']) {
+      expect(() => createApp({ NODE_ENV: 'production', VERCEL: '1', VERCEL_URL: host })).toThrow()
+    }
+  })
+  test('Vercel refuses file budgets even with a key and positive allowance', async () => {
+    process.env.VERCEL = '1'
+    process.env.OPENAI_API_KEY = 'test-only-placeholder'
+    const base = await serve()
+    expect((await (await fetch(base + '/api/health')).json() as { aiReady: boolean }).aiReady).toBe(false)
+    for (const route of ['extract', 'report']) {
+      const res = await post(base, route, {})
+      expect(res.status).toBe(503)
+      expect((await res.json() as { error: string }).error).toBe('AI_BUDGET_UNAVAILABLE')
+    }
+    const req = new EventEmitter() as Request
+    const res = new EventEmitter() as Response
+    res.status = mock(() => res)
+    res.json = mock(() => res)
+    const invoke = mock(() => Promise.resolve('must not run'))
+    await withAiCall(req, res, invoke)
+    expect(invoke).not.toHaveBeenCalled()
+    expect(readFileSync(budgetFile, 'utf8')).toBe('0')
+  })
   test('health is JSON; both paid routes fail safely without a key', async () => {
     const base = await serve()
     const health = await (await fetch(`${base}/api/health`)).json() as { aiReady: boolean }

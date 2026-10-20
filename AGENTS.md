@@ -79,3 +79,12 @@ bun run dev
 - Studio deployment tooling is preserved and checked separately via `bun run lint:studio` / `bun run typecheck:studio`; it remains unverified because @circlefin/compass-chains is unavailable outside the supplied Studio environment.
 - Paid AI defaults to disabled. AI_BUDGET_FILE persists the attempt counter only on retained storage; Render persistent disk setup has not been verified.
 - Current pre-commit evidence and staged manifest: docs/stage5.3-report.md. Do not interpret historical Stage 5 results above as validation of unavailable tooling.
+
+## Stage 5.4B — Selected hosting: Vercel
+- Vercel replaces the historical Render deployment plan. Preserve docs/stage5.4a-report.md as historical evidence; current runbook is README.md and docs/stage5.4b-vercel-report.md.
+- Vite emits dist/ for platform static hosting. api/index.ts exports the existing Express API without a listener or static SPA middleware; vercel.json routes /api separately from the frontend fallback.
+- Functions use Node 24.x; Bun remains local/install tooling. lint:app and strict typecheck:app include api/ as well as src/server/Vite configuration.
+- Keep AI_MAX_CALLS=0 and OPENAI_API_KEY absent. File budgets are rejected when VERCEL=1; /tmp is not durable. Future paid AI needs shared transactional storage and authentication.
+- Set NODEJS_HELPERS=0 in Vercel environments so Express owns body parsing and JSON errors. PUBLIC_ORIGIN is the exact stable production HTTPS origin; absent configuration falls back to the exact VERCEL_URL deployment hostname. No wildcard origin aliases.
+- Request/concurrency counters are instance-local, not global quotas. Keep TRUST_PROXY_HOPS=0 pending live verification.
+- Testnet Deal #1 remains released; real AI, public Vercel/browser verification and Arc mainnet requirements remain pending. No deploy, signing or transfer is authorized by these instructions.

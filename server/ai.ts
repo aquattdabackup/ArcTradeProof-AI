@@ -9,6 +9,9 @@ export const AI_CALL_OPTIONS = { maxRetries: 0, maxOutputTokens: 2500 } as const
 let activeCalls = 0
 
 function budget() {
+  // Function files (including /tmp) are not a shared durable allowance.
+  // Paid AI on Vercel requires a future transactional store and authentication.
+  if (process.env.VERCEL === '1') return null
   const maximum = Number(process.env.AI_MAX_CALLS ?? 0)
   const file = process.env.AI_BUDGET_FILE
   if (!Number.isInteger(maximum) || maximum < 1 || maximum > 300 || !file || !isAbsolute(file)) return null

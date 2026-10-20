@@ -9,7 +9,7 @@ import { compareHandler } from './routes/compare.js'
 import { reportHandler } from './routes/report.js'
 import { aiAvailable } from './ai.js'
 
-export function createApp(env: NodeJS.ProcessEnv = process.env) {
+export function createApp(env: NodeJS.ProcessEnv = process.env, options: { serveStatic?: boolean } = {}) {
   const app = express()
   const production = env.NODE_ENV === 'production'
   const proxyHops = Number(env.TRUST_PROXY_HOPS ?? 0)
@@ -20,7 +20,11 @@ export function createApp(env: NodeJS.ProcessEnv = process.env) {
   app.set('trust proxy', proxyHops)
   app.disable('x-powered-by')
   const origins = new Set<string>()
-  for (const value of [env.PUBLIC_ORIGIN ?? env.RENDER_EXTERNAL_URL, env.ALLOWED_ORIGIN]) {
+  // Vercel supplies a hostname, not a URL. Never derive allowed origins from request headers.
+  const platformOrigin = env.VERCEL === '1'
+    ? (env.VERCEL_URL ? `https://${env.VERCEL_URL}` : undefined)
+    : env.RENDER_EXTERNAL_URL
+  for (const value of [env.PUBLIC_ORIGIN ?? platformOrigin, env.ALLOWED_ORIGIN]) {
     if (!value) continue
     const url = new URL(value)
     if (url.origin !== value || !['https:', 'http:'].includes(url.protocol)
@@ -66,7 +70,7 @@ export function createApp(env: NodeJS.ProcessEnv = process.env) {
   app.use('/api', (_req, res) => {
     res.status(404).json({ error: 'NOT_FOUND', message: 'API route not found.' })
   })
-  if (production) {
+  if (production && options.serveStatic !== false) {
     const dist = fileURLToPath(new URL('../dist/', import.meta.url))
     app.use(express.static(dist, { dotfiles: 'deny' }))
     app.get('/{*splat}', (_req, res) => res.sendFile(path.join(dist, 'index.html')))

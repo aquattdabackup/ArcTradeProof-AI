@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": { "node": "24.x" },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -19,7 +20,7 @@
     "test:server": "bun test server/lib/compare.test.ts",
     "test:store": "bun test src/store/dealReviewStore.test.ts",
     "test:all": "bun test server src/store/dealReviewStore.test.ts",
-    "lint:app": "oxlint --type-aware src server vite.config.ts",
+    "lint:app": "oxlint --type-aware src server api vite.config.ts",
     "lint:studio": "oxlint --type-aware scripts",
     "typecheck:app": "tsc --noEmit -p tsconfig.json",
     "typecheck:studio": "tsc --noEmit -p scripts/tsconfig.json",

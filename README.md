@@ -17,8 +17,8 @@ Buyers and suppliers turn commercial agreements (POs, invoices) into verifiable 
 ## Architecture
 
 ```
-Browser SPA (React + wagmi + ConnectKit)
-    └─ /api/*  ──→  Express server (Bun)
+Browser SPA (Vite static output + React/wagmi/ConnectKit)
+    └─ /api/*  ──→  Express Node Function (Vercel)
                         ├─ /api/extract   OpenAI gpt-4o-mini extraction
                         ├─ /api/compare   Deterministic BigInt comparison (no AI)
                         ├─ /api/report    OpenAI gpt-4o-mini advisory narrative
@@ -29,7 +29,7 @@ Browser SPA (React + wagmi + ConnectKit)
 
 In **development**: Vite serves the SPA on port 5173 and proxies `/api/*` to the Express backend on port 3001.
 
-In **production**: Express serves the compiled SPA from `dist/` AND handles `/api/*` on the same port and origin. No Vite proxy. Requests carrying an Origin header must match PUBLIC_ORIGIN (or Render's RENDER_EXTERNAL_URL), or the explicitly configured ALLOWED_ORIGIN. With no origin configured, such requests are denied.
+In **Vercel production**: the platform serves Vite's `dist/` assets; `api/index.ts` runs the Express API as a Node Function under the same HTTPS origin. No production Vite proxy or Express static asset serving. `bun run start` retains the standalone combined server for local checks. Origin-bearing API requests must match the exact configured origin or its documented platform fallback.
 
 ---
 
@@ -40,7 +40,7 @@ In **production**: Express serves the compiled SPA from `dist/` AND handles `/ap
 | Frontend | React 18, Vite 6, TypeScript, Tailwind CSS |
 | Web3 | wagmi v2, viem v2, ConnectKit |
 | Smart contract | Solidity ^0.8.20, Foundry |
-| Backend | Express 5, Bun 1.3.14 |
+| Backend | Express 5; Vercel Node 24.x; local Bun 1.3.14 tooling |
 | AI | OpenAI gpt-4o-mini via `@ai-sdk/openai` |
 | Chain | Arc Testnet (5042002) / Arc Mainnet (5042) |
 | Token | USDC ERC-20, 6 decimals |
@@ -97,13 +97,13 @@ bun run test:store      # deal review store and hash tests (27 tests)
 ### Application and Studio tooling checks
 
 ```bash
-bun run lint:app        # type-aware lint: src/, server/, vite.config.ts
+bun run lint:app        # type-aware lint: src/, server/, api/, vite.config.ts
 bun run typecheck:app   # strict TypeScript check of the same application scope
 bun run lint           # alias for lint:app
 bun run typecheck      # alias for typecheck:app
 ```
 
-`tsconfig.json` retains `strict: true` and all previous compiler safety settings. It checks the production frontend/backend, their tests, and Vite configuration. Studio deployment scripts have a separate `scripts/tsconfig.json` with the same strict settings and explicit Node/Bun types:
+`tsconfig.json` retains `strict: true` and all previous compiler safety settings. It checks the production frontend/backend, the Vercel Function entry, their tests, and Vite configuration. Studio deployment scripts have a separate `scripts/tsconfig.json` with the same strict settings and explicit Node/Bun types:
 
 ```bash
 bun run lint:studio
@@ -123,73 +123,64 @@ NODE_ENV=production bun run start
 
 ---
 
-## Deployment: Render (first public deployment, paid AI disabled)
+## Deployment: Vercel (selected platform)
 
-Render serves the SPA and API from one Web Service. This is a limited public testnet demo, not a verified AI service. Review [the Stage 5.4A pre-flight report](docs/stage5.4a-report.md) before operating the dashboard. Preparation does not authorize deployment.
+**Initial mode: zero paid AI.** Keep `AI_MAX_CALLS=0`, leave `OPENAI_API_KEY` absent, and do not perform blockchain transactions for deployment verification. Implementation and local tests are complete; no Vercel deployment or public browser/wallet verification has been performed. See [the Stage 5.4B report](docs/stage5.4b-vercel-report.md) for exact evidence, limitations and the user-operated checklist.
 
-### Source and runtime
+### Hosting and routing
 
-After review and explicit deployment approval, choose **New > Web Service > Git Provider**, connect GitHub, and select `aquattdabackup/ArcTradeProof-AI`. Use the existing repository; do not reinitialize Git. Creating the service starts its first deployment. [Render Web Services](https://render.com/docs/web-services)
+Use one GitHub-connected Vercel project with the **Vite** preset. `bun run build` produces `dist/`, which Vercel serves as static content. `api/index.ts` exports the existing Express API as a Node Function with static serving disabled; it does not open a listener. `vercel.json` routes `/api` and `/api/*` to that Function, while the SPA fallback explicitly excludes those paths. Existing static files take precedence over rewrites. Unknown API routes remain JSON 404 responses. Do not add a blanket SPA rewrite that swallows the API. [Vite deployment](https://vercel.com/docs/frameworks/frontend/vite), [routing configuration](https://vercel.com/docs/project-configuration/vercel-json)
+
+Vercel's Express support does not serve assets through `express.static()`. We use Vite's output-directory hosting rather than the standalone Express preset/public-directory model. The standalone `bun run start` command is retained for local verification and is not the Vercel start command. [Express on Vercel](https://vercel.com/docs/frameworks/backend/express)
+
+### Dashboard settings after separate deployment approval
 
 | Setting | Value |
 |---|---|
-| Source | GitHub-connected `aquattdabackup/ArcTradeProof-AI` |
-| Branch | `main`; verify the approved commit in the deployment details |
-| Root Directory | Leave unset (repository root) |
-| Language / Runtime | Native Node / JavaScript-TypeScript, with Bun |
-| Region | Choose the region appropriate for the intended audience |
-| Build Command | `bun --version && bun install --frozen-lockfile && bun run build` |
-| Start Command | `bun run start` |
-| Health Check Path | `/api/health` |
-| Instances / processes | One instance, the single process started by the command above |
-| Auto-Deploy | Off during this controlled rollout; deploy only after review |
+| Git repository | `aquattdabackup/ArcTradeProof-AI` via the GitHub integration |
+| Production branch | `main`; verify the approved commit |
+| Root Directory | Repository root |
+| Framework Preset | **Vite**, not Express |
+| Node.js Version | **24.x**, also specified in package.json |
+| Install Command | `bun install --frozen-lockfile` |
+| Build Command | `bun run build` |
+| Output Directory | `dist` |
+| Function | `api/index.ts`; maximum duration **60 seconds** in vercel.json |
+| Start command / PORT | None; Vercel invokes the Function |
 
-Render's native JavaScript runtime supports Bun at build and runtime. Set `BUN_VERSION=1.3.14`; the repository also contains `.bun-version` with that value. Render supports both, with the environment variable taking precedence. The build must include devDependencies for Vite; do not add `--production` to the install command. [Native runtimes](https://render.com/docs/native-runtimes), [Bun version selection](https://render.com/docs/bun-version)
+Node 24.x was selected and the transpiled API was exercised locally on Node 24.19.0. Vercel manages patch versions. Bun 1.3.14 remains the local test/install baseline; it is not a Vercel runtime pin. The current beta Bun runtime accepts `bunVersion: "1.x"` or `"1.4.x"`, not an exact patch. This project does not set bunVersion. [Node versions](https://vercel.com/docs/functions/runtimes/node-js/node-js-versions), [Bun runtime](https://vercel.com/docs/functions/runtimes/bun)
 
-Auto-deploys otherwise default to deployment on a linked-branch commit. Select **Off** in service Settings for manual control. [Deployment controls](https://render.com/docs/deploys)
+### Environment reference
 
-### First-deployment environment
+Configure Production and Preview deliberately; no secrets belong in VITE_ variables or source.
 
-| Key | Exact action |
+| Variable | Required action |
 |---|---|
-| `BUN_VERSION` | Set `1.3.14` |
-| `NODE_ENV` | Set `production` |
-| `AI_MAX_CALLS` | Set `0` |
-| `TRUST_PROXY_HOPS` | Set `0`; actual Render proxy behavior is not verified |
-| `OPENAI_API_KEY` | **Do not add**; ensure no attached environment group supplies it |
-| `AI_BUDGET_FILE` | Leave unset while paid AI is disabled; no disk is required for this mode |
-| `PORT` | Do not override; use Render's supplied port (default `10000`) |
-| `PUBLIC_ORIGIN` | Leave **unset**, not an empty entry, to use `RENDER_EXTERNAL_URL` for the default domain |
-| `ALLOWED_ORIGIN` | Leave unset; never use `*` |
-| `VITE_STUDIO_DEBUG` | Leave unset; production tracing remains excluded |
+| `NODE_ENV` | `production` for deployed builds/runtime |
+| `AI_MAX_CALLS` | `0` in both environments |
+| `OPENAI_API_KEY` | **Absent**, including shared/integration-supplied variables |
+| `AI_BUDGET_FILE` | **Absent** on Vercel; `/tmp` is not a budget store |
+| `NODEJS_HELPERS` | **`0`**, at build and runtime, so Express owns body parsing and JSON errors |
+| `PUBLIC_ORIGIN` | Production: exact stable HTTPS project/custom-domain origin, no trailing slash |
+| `PUBLIC_ORIGIN` in Preview | Leave absent to accept only `https://VERCEL_URL`, or explicitly set the exact preview origin |
+| `ALLOWED_ORIGIN` | Leave absent unless a second exact origin is deliberately needed |
+| `TRUST_PROXY_HOPS` | `0`; live Vercel proxy behavior is not yet verified |
+| `VERCEL`, `VERCEL_URL` | Platform-provided; enable automatic system environment variables, do not fabricate values in Dashboard |
+| `VITE_STUDIO_DEBUG`, deployment private keys | Leave absent |
 
-Do not upload `.env` or configure deployment private keys, seed phrases or browser credentials. Keep the existing ignore rules for local files, generated bundles and debug logs. Old log history is not removed by those ignore rules.
+The generated deployment hostname in VERCEL_URL has no scheme. The API prepends HTTPS and validates the exact origin; it never trusts the request Host or forwarded-host header for CORS. Preview aliases are not automatically allowed. PUBLIC_ORIGIN overrides the fallback, and an explicit blank value denies Origin-bearing requests. Use the generated deployment URL for Preview, and set the stable production origin before promoting a deployment. [System environment variables](https://vercel.com/docs/environment-variables/system-environment-variables)
 
-Render supplies `RENDER_EXTERNAL_URL` as the service's HTTPS `onrender.com` URL. The server validates it as an exact HTTPS origin; neither Host nor forwarded headers choose the allowed origin. If using a custom domain later, set `PUBLIC_ORIGIN` to its exact HTTPS origin with no trailing slash. An explicit empty value suppresses the fallback and denies Origin-bearing requests. [Render environment variables](https://render.com/docs/environment-variables)
+Set NODEJS_HELPERS=0 for both environments before building; environment changes require a new deployment to affect its build/runtime. No CLI login, environment pull, project linking or deployment was performed during this task. [Node helper configuration](https://vercel.com/docs/functions/runtimes/node-js/advanced-node-configuration), [environment variables](https://vercel.com/docs/environment-variables)
 
-Keep `TRUST_PROXY_HOPS=0` until actual proxy behavior is verified. This ignores caller-supplied forwarded IPs but can group visitors behind Render proxies into shared rate-limit buckets (20 POST requests per 15 minutes). Do not change it to `1` merely to resolve a 429; the existing one-hop unit test is not proof of Render topology.
+### Verify the actual public HTTPS URL after approval
 
-### Verify after an approved, user-operated deployment
+The operator must verify root/JS/CSS/deep-link loading, health JSON, structured comparison, unknown API JSON 404 and CORS on the deployed URL. Expect `/api/health` to return 200 with `aiReady: false`, `model: null`; POST empty JSON to `/api/extract` and `/api/report` should return 503 `AI_NOT_CONFIGURED`. The UI should display AI unavailable and disable analysis. A 200 health response is not proof of inference, browser rendering or wallet behavior. Review deployment protection/public access so judges can reach the intended URL without your account, while retaining deliberate access controls.
 
-Use the **actual** HTTPS URL shown by Render, not the placeholder below:
+### Future paid AI is blocked pending a separate design
 
-```bash
-curl -i https://YOUR-SERVICE.onrender.com/api/health
-# Expect HTTP 200, status "ok", aiReady false, model null.
-curl -i -X POST https://YOUR-SERVICE.onrender.com/api/extract \
-  -H 'Content-Type: application/json' -d '{}'
-# Expect HTTP 503, AI_NOT_CONFIGURED. Repeat for /api/report.
-```
+When `VERCEL=1`, server/ai.ts rejects the file-budget mechanism even if a key and positive allowance are configured. Do not remove that guard or put a budget in `/tmp`. Vercel Function filesystems and instance memory are not shared durable quotas. Current request and concurrency limits apply per instance only; they reset and multiply across instances. Future paid AI requires authenticated users, shared atomic budget reservations, distributed concurrency enforcement and failure/retry tests before separate enablement approval. [Function runtime/filesystem](https://vercel.com/docs/functions/runtimes), [concurrency scaling](https://vercel.com/docs/functions/concurrency-scaling)
 
-Render's HTTP health check accepts 2xx/3xx responses. This endpoint checks API liveness and AI configuration, not successful inference, static assets, RPC availability or wallet interaction. [Health checks](https://render.com/docs/health-checks)
-
-Open the public HTTPS page and verify the JS/CSS load, a refreshed SPA path loads, `/api/unknown` returns JSON 404, same-origin API calls work, and an unrelated Origin returns 403 without an allow-origin header. The UI must show AI unavailable and disable analysis. Follow the report's deployment checklist; do not sign wallet transactions as part of this pre-flight. Browser and public-host checks have not been performed locally.
-
-### Paid AI is a separate, future approval
-
-Never enable paid inference on ephemeral filesystem storage. The budget integer at `AI_BUDGET_FILE` survives normal restarts only when the same file is retained. A later paid configuration requires a paid Render service with a persistent disk mounted, for example, at `/var/data`, with `AI_BUDGET_FILE=/var/data/arctradeproof/ai-calls.json`, and exactly one process/instance. Only paths under the mount persist; disks are available at runtime and prevent multi-instance scaling and zero-downtime deploys. No disk has been configured or verified here. [Persistent disks](https://render.com/docs/disks)
-
-A shared transactional database with atomic capped reservations is an alternative requiring implementation and tests; it is not supported by the current file-based code. Before future AI approval, verify storage across restart/redeploy, proxy handling and access controls. A real successful inference is still required before claiming AI works. See the budget limitations below and the pre-flight report.
+Render is **no longer the selected deployment path**. The [Stage 5.4A Render report](docs/stage5.4a-report.md) is preserved unchanged as historical evidence, not the current setup instructions.
 
 ---
 
@@ -272,9 +263,9 @@ The sequence below describes the intended testnet flow, not a verified general-p
 
 ## AI Endpoint Abuse Protection
 
-- AI is disabled by default (`AI_MAX_CALLS=0`), even if a server key exists. Configure an allowance and a persistent budget path to enable the judging demo.
+- AI is disabled by default (`AI_MAX_CALLS=0`). On Vercel, file-based allowances are additionally rejected; no environment-only change can safely enable paid judging. The following retained file-budget details apply only to a standalone single-process server, not Vercel.
 - One shared, finite allowance covers extraction and report calls across visitors. Each attempt is persisted **before** calling OpenAI, including failures. Normal process restarts using the same file preserve usage (verified with separate local processes). No automatic reset. Increasing AI_MAX_CALLS increases the lifetime allowance (maximum 300); deleting the budget file resets it and must be treated as an explicit operator action.
-- **Render persistence is not configured or verified by this repository or this review.** Before enabling paid AI, attach a persistent disk and point AI_BUDGET_FILE inside its mount. The example path alone does not provision storage.
+- **Historical standalone/Render option only:** retained storage was never configured or verified. A persistent mount would be required for that single-process file budget. This is not the selected Vercel design; follow the shared-store requirements above for Vercel.
 - Run exactly **one process and one instance**. Atomic file replacement protects against partial writes, not competing processes. Multiple replicas require a shared transactional store before enabling paid AI. Ephemeral storage loses the limit on redeploy; use a persistent disk. The zero-key demo can run without a disk.
 - At most 2 concurrent AI calls, 2,500 output tokens each, no automatic retries, and a 30-second abort signal. A canceled or failed call may still be billed by the provider.
 - Public POST routes share 20 requests per 15 minutes per client IP (including IPv6 subnet grouping), before JSON parsing. This limits requests, not just successful inference. Test the configured reverse proxy hop count against the live host; a local simulation cannot prove provider topology.
@@ -284,9 +275,9 @@ The sequence below describes the intended testnet flow, not a verified general-p
 - CORS fails closed. CORS is a browser policy, **not authentication**: anonymous command-line callers can spend the bounded allowance. They can exhaust it and deny access to judges. For restricted judging, place an authenticated gateway in front of AI routes or the service; never embed a shared secret in the SPA.
 - Studio capture is opt-in in development with `VITE_STUDIO_DEBUG=true`; both import paths are removed by Vite in production. Use only synthetic documents when enabling capture.
 
-For judging: open the SPA, load the provided synthetic PO/invoice files, run analysis, and inspect the advisory results. No login is needed with the allowance enabled. Without a server key the UI remains accessible, AI routes return JSON 503, and deterministic `/api/compare` remains available. A real inference session must still be verified by the owner.
+For the initial Vercel preview, the SPA remains accessible, AI routes return JSON 503, and deterministic `/api/compare` remains available for structured documents. Analysis is disabled. Future paid judging requires the durable-store/authentication work described in the report and an owner-verified real inference session.
 
-Proxy guidance: [Express behind proxies](https://expressjs.com/en/guide/behind-proxies.html), [Render edge protection and client IP guidance](https://render.com/articles/how-render-handles-ddos-attacks). PDF API: [pdf-parse v2](https://github.com/mehmet-kozan/pdf-parse).
+Proxy guidance: [Express behind proxies](https://expressjs.com/en/guide/behind-proxies.html). Host-specific verification remains pending. PDF API: [pdf-parse v2](https://github.com/mehmet-kozan/pdf-parse).
 
 ---
 
@@ -321,6 +312,10 @@ server/
     pdfExtract.ts             pdf-parse wrapper
     compare.ts                Deterministic BigInt comparison engine
     compare.test.ts           47 unit tests
+
+api/
+  index.ts                    Vercel Node Function, exports Express API only
+vercel.json                   Vite output, API routing and SPA fallback
 
 src/
   App.tsx                     Root — tab navigation + DealReviewProvider
