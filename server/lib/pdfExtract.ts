@@ -1,10 +1,12 @@
 /** Bounded server-side text extraction using the installed pdf-parse v2 API. */
-import { PDFParse } from 'pdf-parse'
 import { MAX_TEXT } from '../schemas.js'
 
 export async function extractTextFromBuffer(buffer: Buffer, mimeType: string): Promise<string> {
   if (mimeType === 'application/pdf') {
     if (!buffer.subarray(0, 5).equals(Buffer.from('%PDF-'))) throw new Error('Invalid PDF')
+    // PDF.js needs native canvas globals on Node. Keep optional PDF loading out
+    // of API startup; import failures are handled by the extraction route.
+    const { PDFParse } = await import('pdf-parse')
     const parser = new PDFParse({ data: new Uint8Array(buffer), isEvalSupported: false })
     try {
       const info = await parser.getInfo()
